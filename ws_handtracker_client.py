@@ -12,29 +12,29 @@ import numpy as np
 
 async def send_video_and_receive_results():
     """发送视频到服务器并接收手部跟踪结果"""
-    uri = "ws://10.239.152.90:8765"
+    uri = "ws://localhost:8765"
     
     try:
         async with websockets.connect(uri, max_size=None) as websocket:
             print("已连接到服务器，准备发送视频并接收结果")
             
             # 打开摄像头
-            cap = cv2.VideoCapture(0)
+            cap = cv2.VideoCapture(4)
             if not cap.isOpened():
                 print("无法打开摄像头")
                 return
             
             # 获取摄像头参数
-            # width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            # height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            width = 640
-            height = 480
-            fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            #width = 640
+            #height = 480
+            fps = int(cap.get(cv2.CAP_PROP_FPS)) or 60
             
             # 发送视频元数据
             metadata = {
-                "width": 640,
-                "height": 480,
+                "width": width,
+                "height": height,
                 "fps": fps,
                 "mode": "handtracking"  # 指定为手部跟踪模式
             }

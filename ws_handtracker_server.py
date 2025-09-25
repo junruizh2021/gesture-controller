@@ -1,3 +1,4 @@
+from sys import thread_info
 import numpy as np
 from collections import namedtuple
 import mediapipe_utils as mpu
@@ -19,22 +20,36 @@ os.environ['QT_QPA_PLATFORM'] = 'xcb'
 os.environ['QT_X11_NO_MITSHM'] = '1'
 os.environ['QT_DEBUG_PLUGINS'] = '0'
 
+
 class DynamicGestureProcessor:
-    """动态手势处理器"""
+    """动态手势处理器（集成挥手检测）"""
     
-    def __init__(self, window_size=10, min_confidence=0.7):
+    def __init__(self, window_size=10, min_confidence=0.7, enable_wave_detection=False, 
+                 wave_threshold=0.2, wave_min_movement=10, wave_window_size=10):
         """
         初始化动态手势处理器
         
         Args:
             window_size: 滑动窗口大小（帧数）
             min_confidence: 最小置信度阈值
+            enable_wave_detection: 是否启用挥手检测
+            wave_threshold: 挥手检测阈值比例
+            wave_min_movement: 最小移动像素数
+            wave_window_size: 挥手检测滑动窗口大小
         """
         self.window_size = window_size
         self.min_confidence = min_confidence
         self.gesture_history = deque(maxlen=window_size)  # 存储手势历史
         self.last_gesture = None
         self.gesture_count = 0
+        self.enable_wave_detection = enable_wave_detection
+        
+        # 挥手检测相关属性
+        self.wave_threshold = wave_threshold
+        self.wave_min_movement = wave_min_movement
+        self.wave_window_size = wave_window_size
+        self.landmark_history = deque(maxlen=wave_window_size)  # 存储关键点历史
+        self.frame_width = 640  # 默认宽度
         
         # 定义动态手势模式
         self.dynamic_patterns = {
@@ -42,46 +57,187 @@ class DynamicGestureProcessor:
                 "pattern": ["FIVE", "FIST"],
                 "description": "从张开到握拳"
             },
-            "OPEN_GESTURE": {
-                "pattern": ["FIST", "FIVE"],
-                "description": "从握拳到张开"
+            "ONE_FINGER_GESTURE": {
+                "pattern": ["FIST", "ONE"],
+                "description": "比1手势"
             },
-            "PEACE_WAVE": {
-                "pattern": ["PEACE", "FIVE", "PEACE"],
-                "description": "和平手势挥手"
+            "TWO_FINGER_GESTURE": {
+                "pattern": ["FIST", "TWO"],
+                "description": "比2手势"
             },
-            "THUMBS_UP_DOWN": {
-                "pattern": ["OK", "FIST", "OK"],
-                "description": "拇指上下"
+            # "LIKE_GESTURE": {
+            #     "pattern": ["FIST", "OK"],
+            #     "description": "点赞手势"
+            # },
+            # 滑动窗口挥手模式
+            "WAVE_GESTURE": {
+                "pattern": ["WAVE"],
+                "description": "挥手动作（滑动窗口检测）"
             },
-            "FINGER_COUNT_UP": {
-                "pattern": ["FIST", "ONE", "TWO", "FIVE"],
-                "description": "逐指张开"
-            }
         }
     
-    async def process_frame(self, hand_info):
+    def detect_wave_with_sliding_window(self, landmarks, frame_width):
+        """
+        使用滑动窗口检测挥手动作
+        
+        Args:
+            landmarks: 当前帧的手部关键点
+            frame_width: 图像宽度
+            
+        Returns:
+            str: "WAVE" 或 None
+        """
+        if not self.enable_wave_detection or landmarks is None or len(landmarks) < 21:
+            return None
+        
+        # 更新帧宽度
+        self.frame_width = frame_width
+        threshold = self.wave_threshold * frame_width
+        
+        # 获取关键点索引（对应handwave-demo.py中的关键点）
+        # 8: 食指指尖, 12: 中指指尖, 16: 无名指指尖, 20: 小指指尖
+        key_points = [8, 12, 16, 20]
+        
+        # 提取当前帧的关键点
+        current_points = []
+        for idx in key_points:
+            if idx < len(landmarks):
+                # landmarks格式: [x, y, z] 其中x,y是归一化坐标
+                x = landmarks[idx][0] * frame_width  # 转换为像素坐标
+                y = landmarks[idx][1] * frame_width
+                current_points.append((x, y))
+            else:
+                return None
+        
+        # 添加到滑动窗口
+        self.landmark_history.append({
+            'points': current_points,
+            'timestamp': datetime.now()
+        })
+        
+        # 需要至少2帧数据才能检测挥手
+        if len(self.landmark_history) < 2:
+            return None
+        
+        # 使用滑动窗口检测挥手
+        return self._analyze_wave_pattern()
+    
+    def _analyze_wave_pattern(self):
+        """
+        分析滑动窗口中的挥手模式
+        
+        Returns:
+            str: "WAVE" 或 None
+        """
+        if len(self.landmark_history) < 2:
+            return None
+        
+        # 获取滑动窗口中的所有关键点
+        all_points = [frame['points'] for frame in self.landmark_history]
+        
+        # 计算每个关键点的移动轨迹
+        movements = []
+        for point_idx in range(len(all_points[0])):  # 遍历每个关键点
+            point_movements = []
+            for frame_idx in range(1, len(all_points)):  # 从第二帧开始
+                curr_point = all_points[frame_idx][point_idx]
+                prev_point = all_points[frame_idx - 1][point_idx]
+                
+                dx = curr_point[0] - prev_point[0]
+                dy = curr_point[1] - prev_point[1]
+                point_movements.append((dx, dy))
+            
+            movements.append(point_movements)
+        
+        # 分析移动模式
+        wave_detected = self._detect_wave_direction(movements)
+        
+        if wave_detected:
+            # 清空历史记录，避免重复触发
+            self.landmark_history.clear()
+            return "WAVE"
+        
+        return None
+    
+    def _detect_wave_direction(self, movements):
+        """
+        检测挥手方向
+        
+        Args:
+            movements: 关键点移动轨迹列表
+            
+        Returns:
+            bool: 是否检测到挥手
+        """
+        if not movements or not movements[0]:
+            return False
+        
+        # 计算每个关键点的平均移动方向
+        avg_movements = []
+        for point_movements in movements:
+            if not point_movements:
+                return False
+            
+            # 计算平均移动
+            avg_dx = sum(mov[0] for mov in point_movements) / len(point_movements)
+            avg_dy = sum(mov[1] for mov in point_movements) / len(point_movements)
+            avg_movements.append((avg_dx, avg_dy))
+        
+        # 检查是否所有关键点都向同一方向移动
+        ## threshold = self.wave_threshold * self.frame_width
+        threshold = 30
+        
+        # 检查向右挥手
+        if all(mov[0] > threshold for mov in avg_movements):
+            return True
+        
+        # # 检查向左挥手
+        # if all(mov[0] < -threshold for mov in avg_movements):
+        #     return True
+        
+        # # 检查向上挥手
+        # if all(mov[1] < -threshold for mov in avg_movements):
+        #     return True
+        
+        # # 检查向下挥手
+        # if all(mov[1] > threshold for mov in avg_movements):
+        #     return True
+        
+        return False
+    
+    async def process_frame(self, hand_info, frame_width=640):
         """
         处理单帧手势信息
         
         Args:
             hand_info: 包含手势信息的字典
+            frame_width: 图像宽度，用于挥手检测
         """
-        if not hand_info or not hand_info.get('gesture'):
+        if not hand_info:
             return
         
-        current_gesture = hand_info['gesture']
+        current_gesture = hand_info.get('gesture')
         confidence = hand_info.get('score', 0)
+        landmarks = hand_info.get('landmarks', [])
         
-        # 只处理置信度足够高的手势
-        if confidence < self.min_confidence:
+        # 使用滑动窗口检测挥手动作
+        wave_gesture = None
+        if self.enable_wave_detection and landmarks:
+            wave_gesture = self.detect_wave_with_sliding_window(landmarks, frame_width)
+        
+        # 确定最终手势（优先使用挥手检测结果）
+        final_gesture = wave_gesture if wave_gesture else current_gesture
+        
+        # 只处理置信度足够高的静态手势，挥手检测不受置信度限制
+        if not wave_gesture and confidence < self.min_confidence:
             return
         
         # 添加到历史记录
         self.gesture_history.append({
-            'gesture': current_gesture,
+            'gesture': final_gesture,
             'confidence': confidence,
-            'timestamp': datetime.now()
+            'timestamp': datetime.now(),
+            'is_wave': wave_gesture is not None
         })
         
         # 检查动态手势模式
@@ -98,7 +254,9 @@ class DynamicGestureProcessor:
         # 检查每个预定义模式
         for pattern_name, pattern_info in self.dynamic_patterns.items():
             if self._matches_pattern(recent_gestures, pattern_info['pattern']):
-                await self._trigger_dynamic_gesture(pattern_name, pattern_info['description'])
+                # 清空历史记录，避免重复触发
+                self.gesture_history.clear()
+                self._trigger_dynamic_gesture(pattern_name, pattern_info['description'])
                 break
     
     def _matches_pattern(self, gesture_sequence, pattern):
@@ -112,33 +270,54 @@ class DynamicGestureProcessor:
         Returns:
             bool: 是否匹配
         """
-        if len(gesture_sequence) < len(pattern):
+        # 打印手势序列和模式
+        # print(f"手势序列: {gesture_sequence}")
+        # print(f"模式: {pattern}")
+        
+        if not pattern:
+            return True
+        if not gesture_sequence:
             return False
         
-        # 检查最近的序列是否匹配模式
-        recent_sequence = gesture_sequence[-len(pattern):]
+        # 子序列匹配算法
+        # 支持模式中的手势在序列中按顺序出现但允许中间有间隔
+        pattern_index = 0
+        pattern_len = len(pattern)
         
-        # 允许模式匹配有一定的容错性
-        matches = 0
-        for i, expected_gesture in enumerate(pattern):
-            if i < len(recent_sequence) and recent_sequence[i] == expected_gesture:
-                matches += 1
+        for gesture in gesture_sequence:
+            if gesture == pattern[pattern_index]:
+                pattern_index += 1
+                if pattern_index == pattern_len:
+                    return True
         
-        # 至少80%匹配才认为是有效模式
-        return matches >= len(pattern) * 0.8
+        return False
     
-    async def _trigger_dynamic_gesture(self, pattern_name, description):
+    def _trigger_dynamic_gesture(self, pattern_name, description):
         """触发动态手势事件"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] 动态手势检测: {pattern_name} - {description}")
         
-        # 这里可以添加更多处理逻辑，比如：
-        # - 发送WebSocket消息给客户端
-        # - 触发特定的动作
-        # - 记录到日志文件等
-        
-        # 清空历史记录，避免重复触发
-        self.gesture_history.clear()
+        # 使用任务队列发送舵机控制指令（非阻塞）
+        try:
+            from task_queue import get_task_producer
+            producer = get_task_producer()
+            
+            # 创建舵机控制任务
+            success = producer.create_servo_control_task(
+                gesture_name=pattern_name,
+                description=description,
+                priority=0  # 高优先级
+            )
+            
+            if success:
+                print(f"[{timestamp}] 舵机控制任务已发送到队列: {pattern_name}")
+            else:
+                print(f"[{timestamp}] 发送舵机控制任务失败: {pattern_name}")
+                
+        except ImportError:
+            print(f"[{timestamp}] 任务队列模块未找到，跳过舵机控制")
+        except Exception as e:
+            print(f"[{timestamp}] 舵机控制任务发送异常: {e}")
     
     def get_gesture_statistics(self):
         """获取手势统计信息"""
@@ -171,6 +350,7 @@ class HandTracker:
                 use_gesture=False,
                 crop=False,
                 no_gui=False,
+                right_hand_only=False,
                 show_pd_box=None, show_pd_kps=None, show_rot_rect=None,
                 show_landmarks=None, show_handedness=None, show_scores=None,
                 show_gesture_display=None, show_original_video=None):
@@ -182,6 +362,7 @@ class HandTracker:
         self.use_gesture = use_gesture
         self.crop = crop
         self.no_gui = no_gui
+        self.right_hand_only = right_hand_only
         
         # 跟踪摄像头索引
         self.current_camera_index = None
@@ -527,6 +708,13 @@ class HandTracker:
                     glob_lm_rtrip_time += now() - lm_rtrip_time
                     nb_lm_inferences += 1
                     self.lm_postprocess(r, inference)
+                    
+                    # 检查是否只处理右手
+                    if self.right_hand_only:
+                        handedness = float(getattr(r, 'handedness', 0))
+                        if handedness <= 0.5:  # 只处理右手
+                            continue
+                    
                     self.lm_render(annotated_frame, r)
 
             if not self.crop:
@@ -694,6 +882,13 @@ class HandTracker:
             hand_data = []
             if hasattr(self, 'regions'):
                 for region in self.regions:
+                    # 检查是否只处理右手
+                    handedness = float(getattr(region, 'handedness', 0))
+                    if hasattr(self, 'right_hand_only') and self.right_hand_only:
+                        # 只处理右手 (handedness > 0.5 表示右手)
+                        if handedness <= 0.5:
+                            continue
+                    
                     # 转换 landmarks 为可序列化的格式
                     landmarks = getattr(region, 'landmarks', [])
                     if landmarks:
@@ -709,7 +904,7 @@ class HandTracker:
                     
                     hand_info = {
                         'gesture': getattr(region, 'gesture', None),
-                        'handedness': float(getattr(region, 'handedness', 0)),  # 确保是 Python float
+                        'handedness': handedness,
                         'landmarks': landmarks_serializable,
                         'score': float(getattr(region, 'lm_score', 0))  # 确保是 Python float
                     }
@@ -717,7 +912,7 @@ class HandTracker:
                     
                     # 处理动态手势（如果启用）
                     if dynamic_processor is not None:
-                        await dynamic_processor.process_frame(hand_info)
+                        await dynamic_processor.process_frame(hand_info, w)
 
             # 编码处理后的帧
             _, buffer = cv2.imencode('.jpg', annotated_frame)
@@ -785,8 +980,7 @@ async def handtracker_websocket_handler(websocket):
         async for message in websocket:
             try:
                 # 更新FPS
-                ht.fps.update()
-                
+                ht.fps.update() 
                 # 解码视频帧
                 if isinstance(message, (bytes, bytearray)):
                     nparr = np.frombuffer(message, np.uint8)
@@ -839,16 +1033,33 @@ async def handtracker_websocket_handler(websocket):
     finally:
         print("WebSocket连接已关闭")
 
-async def main():
+async def initialize_handtracker():
+    """初始化HandTracker和动态手势处理器"""
     global ht, dynamic_processor
+    
+    # 检查是否有全局args
+    import sys
+    current_module = sys.modules[__name__]
+    if not hasattr(current_module, 'args') or current_module.args is None:
+        raise RuntimeError("HandTracker未初始化，请先设置args参数")
+    
+    args = current_module.args
     
     # 初始化动态手势处理器
     if args.dynamic_gestures:
         dynamic_processor = DynamicGestureProcessor(
             window_size=args.gesture_window_size,
-            min_confidence=args.gesture_confidence
+            min_confidence=args.gesture_confidence,
+            enable_wave_detection=args.enable_wave_detection,
+            wave_threshold=args.wave_threshold,
+            wave_min_movement=args.wave_min_movement,
+            wave_window_size=args.wave_window_size
         )
         print(f"动态手势处理已启用 - 窗口大小: {args.gesture_window_size}, 置信度阈值: {args.gesture_confidence}")
+        print(f"挥手检测: {'启用' if args.enable_wave_detection else '禁用'}")
+        if args.enable_wave_detection:
+            print(f"挥手检测参数 - 阈值比例: {args.wave_threshold}, 最小移动: {args.wave_min_movement}px")
+            print(f"滑动窗口大小: {args.wave_window_size} 帧")
     else:
         dynamic_processor = None
         print("动态手势处理已禁用")
@@ -871,6 +1082,7 @@ async def main():
                     use_gesture=args.gesture,
                     crop=args.crop,
                     no_gui=True,  # WebSocket模式下强制无头模式
+                    right_hand_only=args.right_hand_only,
                     show_pd_box=show_pd_box,
                     show_pd_kps=show_pd_kps,
                     show_rot_rect=show_rot_rect,
@@ -880,10 +1092,7 @@ async def main():
                     show_gesture_display=show_gesture_display,
                     show_original_video=show_original_video)
     
-    # 启动WebSocket服务器
-    print("启动手部跟踪WebSocket服务器...")
-    print("服务器地址: ws://0.0.0.0:8765")
-    print("功能: 接收客户端视频流，进行手势识别，返回识别结果")
+    print("HandTracker初始化完成")
     print("\n=== 当前显示设置 ===")
     print(f"手掌检测框: {'开启' if ht.show_pd_box else '关闭'}")
     print(f"手掌关键点: {'开启' if ht.show_pd_kps else '关闭'}")
@@ -893,7 +1102,38 @@ async def main():
     print(f"分数显示: {'开启' if ht.show_scores else '关闭'}")
     print(f"手势识别: {'开启' if ht.show_gesture else '关闭'}")
     print(f"原始视频窗口: {'开启' if ht.show_original_video else '关闭'}")
+    print(f"右手检测: {'开启' if ht.right_hand_only else '关闭'}")
     print("=" * 30)
+
+async def main():
+    global ht, dynamic_processor
+    
+    # 初始化HandTracker和动态手势处理器
+    await initialize_handtracker()
+    
+    # 启动WebSocket服务器
+    print("启动手部跟踪WebSocket服务器...")
+    print("服务器地址: ws://0.0.0.0:8765")
+    print("功能: 接收客户端视频流，进行手势识别，返回识别结果")
+    
+    # 初始化舵机控制器
+    if args.enable_servo:
+        try:
+            from servo_controller import initialize_servo_controller
+            servo_controller = initialize_servo_controller(
+                port=args.servo_port,      # 舵机串口
+                baudrate=args.servo_baudrate,  # 波特率
+                servo_id=args.servo_id     # 舵机ID
+            )
+            if servo_controller.is_connected:
+                print("✓ 舵机控制器初始化成功")
+            else:
+                print("⚠ 舵机控制器初始化失败，将跳过舵机控制功能")
+        except Exception as e:
+            print(f"⚠ 舵机控制器初始化异常: {e}")
+            print("将跳过舵机控制功能")
+    else:
+        print("舵机控制功能已禁用")
     
     # 启动WebSocket服务器
     async with websockets.serve(handtracker_websocket_handler, "0.0.0.0", 8765):
@@ -920,6 +1160,8 @@ if __name__ == "__main__":
                         help="center crop frames to a square shape before feeding palm detection model")
     parser.add_argument('--no_gui', action="store_true", 
                         help="run in headless mode without GUI display")
+    parser.add_argument('--right_hand_only', action="store_true", 
+                        help="only process right hand gestures")
     
     # 显示控制参数
     parser.add_argument('--show_pd_box', action="store_true", 
@@ -964,6 +1206,25 @@ if __name__ == "__main__":
                         help="sliding window size for dynamic gesture detection (default=%(default)s)")
     parser.add_argument('--gesture_confidence', type=float, default=0.6,
                         help="minimum confidence threshold for dynamic gestures (default=%(default)s)")
+    parser.add_argument('--enable_wave_detection', action="store_true", default=False,
+                        help="enable wave gesture detection (default=%(default)s)")
+    parser.add_argument('--wave_threshold', type=float, default=0.2,
+                        help="wave detection threshold ratio (default=%(default)s)")
+    parser.add_argument('--wave_min_movement', type=int, default=50,
+                        help="minimum movement in pixels for wave detection (default=%(default)s)")
+    parser.add_argument('--wave_window_size', type=int, default=5,
+                        help="sliding window size for wave detection (default=%(default)s)")
+    
+    # 舵机控制参数
+    parser.add_argument('--servo_port', type=str, default='/dev/ttyUSB0',
+                        help="servo serial port (default=%(default)s)")
+    parser.add_argument('--servo_baudrate', type=int, default=115200,
+                        help="servo baudrate (default=%(default)s)")
+    parser.add_argument('--servo_id', type=int, default=0,
+                        help="servo ID (default=%(default)s)")
+    parser.add_argument('--enable_servo', action="store_true", default=False,
+                        help="enable servo control")
 
     args = parser.parse_args()
     asyncio.run(main())
+
