@@ -101,6 +101,178 @@ class ServoController:
         except Exception as e:
             logging.error(f"舵机连接测试异常: {e}")
             return False
+    
+    
+    def set_angle(self, angle: float, velocity: Optional[float] = None, 
+                  interval: Optional[int] = 800, wait: bool = True) -> bool:
+        """
+        设置舵机角度 - 改进版本
+        
+        Args:
+            angle: 目标角度 (-180° 到 180°)
+            velocity: 转速 (度/秒)，如果为None则使用默认值
+            interval: 运动时间 (毫秒)，如果为None则使用默认值
+            wait: 是否等待运动完成
+            
+        Returns:
+            bool: 是否成功设置角度
+        """
+        if not self.is_connected or self.control is None:
+            logging.error("舵机未连接，无法设置角度")
+            return False
+        
+        try:
+            # 角度限制
+            angle = max(self.min_angle, min(self.max_angle, angle))
+            
+            # 使用默认参数
+            if velocity is None:
+                velocity = self.default_velocity
+            if interval is None:
+                interval = self.default_interval
+            
+            # 调试日志：打印参数类型和值
+            logging.debug(f"舵机控制参数 - servo_id: {self.servo_id} (类型: {type(self.servo_id)}), "
+                         f"angle: {angle} (类型: {type(angle)}), "
+                         f"velocity: {velocity} (类型: {type(velocity)}), "
+                         f"interval: {interval} (类型: {type(interval)})")
+            
+            # 使用舵机SDK的异步模式
+            self.control.begin_async()
+            
+            # 设置舵机角度
+            self.control.set_servo_angle(
+                servo_id=int(self.servo_id),  # 确保servo_id是整数
+                angle=float(angle),           # 确保angle是浮点数
+                velocity=float(velocity),     # 确保velocity是浮点数
+                interval=int(interval),       # 确保interval是整数
+                is_mturn=True,
+                t_acc=int(interval/2),        # 确保t_acc是整数
+                t_dec=int(interval/2)         # 确保t_dec是整数
+            )
+            
+            # 根据wait参数决定是否等待
+            if wait:
+                # 等待运动完成，使用interval时间估算
+                self.control.end_async(0)  # 0表示等待执行完成
+                # wait_time = interval / 1000.0  # 转换为秒
+                # time.sleep(wait_time + 0.1)  # 额外等待0.1秒确保完成
+                
+                # 更新当前角度
+                self.current_angle = self.control.query_servo_angle(self.servo_id)
+                logging.info(f"舵机运动完成，当前角度: {self.current_angle:.1f}°")
+            else:
+                # 异步执行，立即返回
+                self.control.end_async(1)  # 1表示不等待，立即返回
+                logging.info(f"舵机角度设置完成，目标角度: {angle:.1f}° (异步执行)")
+            
+            # 更新目标角度
+            self.target_angle = angle
+            
+            logging.info(f"设置舵机 {self.servo_id} 角度: {angle:.1f}° (转速: {velocity}°/s, 时间: {interval}ms)")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"设置舵机角度失败: {e}")
+            return False
+    
+    def move_relative(self, delta_angle: float, velocity: Optional[float] = None, 
+                     interval: Optional[int] = None, wait: bool = True) -> bool:
+        """
+        相对角度移动
+        
+        Args:
+            delta_angle: 相对角度变化
+            velocity: 转速 (度/秒)
+            interval: 运动时间 (毫秒)
+            wait: 是否等待运动完成
+            
+        Returns:
+            bool: 是否成功移动
+        """
+        target_angle = self.current_angle + delta_angle
+        return self.set_angle(target_angle, velocity, interval, wait)
+    
+    def get_current_angle(self) -> float:
+        """获取当前角度"""
+        if not self.is_connected or self.control is None:
+            return self.current_angle
+        
+        try:
+            self.current_angle = self.control.query_servo_angle(self.servo_id)
+            return self.current_angle
+        except Exception as e:
+            logging.error(f"获取舵机角度失败: {e}")
+            return self.current_angle
+    
+    def is_moving(self) -> bool:
+        """检查舵机是否正在运动"""
+        if not self.is_connected or self.control is None:
+            return False
+        
+        try:
+            # 通过比较目标角度和当前角度来判断是否在运动
+            current_angle = self.control.query_servo_angle(self.servo_id)
+            angle_diff = abs(self.target_angle - current_angle)
+            return angle_diff > 1.0  # 角度差大于1度认为在运动
+        except Exception as e:
+            logging.error(f"检查舵机运动状态失败: {e}")
+            return False
+    
+    def set_damping(self, power: int = 0):
+        """设置舵机为阻尼模式"""
+        if not self.is_connected or self.control is None:
+            logging.error("舵机未连接，无法设置阻尼模式")
+            return False
+        
+        try:
+            self.control.set_damping(self.servo_id, power)
+            logging.info(f"设置舵机 {self.servo_id} 为阻尼模式，功率: {power}mW")
+            return True
+        except Exception as e:
+            logging.error(f"设置舵机阻尼模式失败: {e}")
+            return False
+    
+    def get_status(self) -> Dict[str, Any]:
+        """获取舵机状态信息"""
+        status = {
+            'connected': self.is_connected,
+            'servo_id': self.servo_id,
+            'current_angle': self.current_angle,
+            'target_angle': self.target_angle,
+            'is_moving': self.is_moving(),
+            'port': self.port,
+            'baudrate': self.baudrate
+        }
+        
+        if self.is_connected and self.control is not None:
+            try:
+                # 获取详细状态信息
+                status.update({
+                    'voltage': self.control.query_voltage(self.servo_id),
+                    'current': self.control.query_current(self.servo_id),
+                    'power': self.control.query_power(self.servo_id),
+                    'temperature': self.control.query_temperature(self.servo_id),
+                    'status': self.control.query_status(self.servo_id)
+                })
+            except Exception as e:
+                logging.error(f"获取舵机详细状态失败: {e}")
+        
+        return status
+    
+    def close(self):
+        """关闭舵机控制器"""
+        if self.uart is not None:
+            try:
+                self.uart.close()
+                logging.info("舵机控制器已关闭")
+            except Exception as e:
+                logging.error(f"关闭舵机控制器失败: {e}")
+        
+        self.is_connected = False
+        self.control = None
+        self.uart = None
 
 # 全局舵机控制器实例
 servo_controller = None

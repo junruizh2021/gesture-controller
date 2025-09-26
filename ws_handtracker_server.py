@@ -1,3 +1,4 @@
+import logging
 from sys import thread_info
 import numpy as np
 from collections import namedtuple
@@ -53,10 +54,10 @@ class DynamicGestureProcessor:
         
         # 定义动态手势模式
         self.dynamic_patterns = {
-            "CLOSE_GESTURE": {
-                "pattern": ["FIVE", "FIST"],
-                "description": "从张开到握拳"
-            },
+            # "CLOSE_GESTURE": {
+            #     "pattern": ["FIVE", "FIST"],
+            #     "description": "从张开到握拳"
+            # },
             "ONE_FINGER_GESTURE": {
                 "pattern": ["FIST", "ONE"],
                 "description": "比1手势"
@@ -71,8 +72,8 @@ class DynamicGestureProcessor:
             # },
             # 滑动窗口挥手模式
             "WAVE_GESTURE": {
-                "pattern": ["WAVE"],
-                "description": "挥手动作（滑动窗口检测）"
+                "pattern": ["FIVE","WAVE", "FIVE"],
+                "description": "挥手动作"
             },
         }
     
@@ -185,22 +186,26 @@ class DynamicGestureProcessor:
         
         # 检查是否所有关键点都向同一方向移动
         ## threshold = self.wave_threshold * self.frame_width
-        threshold = 30
+        threshold = 10
         
         # 检查向右挥手
         if all(mov[0] > threshold for mov in avg_movements):
+            logging.info("向右挥手")
             return True
         
         # # 检查向左挥手
-        # if all(mov[0] < -threshold for mov in avg_movements):
-        #     return True
+        if all(mov[0] < -threshold for mov in avg_movements):
+            logging.info("向左挥手")
+            return True
         
-        # # 检查向上挥手
+        # # # 检查向上挥手
         # if all(mov[1] < -threshold for mov in avg_movements):
+        #     logging.info("向上挥手")
         #     return True
         
-        # # 检查向下挥手
+        # # # 检查向下挥手
         # if all(mov[1] > threshold for mov in avg_movements):
+        #     logging.info("向下挥手")
         #     return True
         
         return False
@@ -271,8 +276,8 @@ class DynamicGestureProcessor:
             bool: 是否匹配
         """
         # 打印手势序列和模式
-        # print(f"手势序列: {gesture_sequence}")
-        # print(f"模式: {pattern}")
+        print(f"手势序列: {gesture_sequence}")
+        print(f"模式: {pattern}")
         
         if not pattern:
             return True

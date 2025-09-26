@@ -71,6 +71,8 @@ class TaskQueue:
         self._queue = mp.Queue(maxsize=maxsize)
         self._task_counter = mp.Value('i', 0)
         self._lock = mp.Lock()
+        self._execution_lock = mp.Lock()  # 执行锁，防止执行期间接收新任务
+        self._is_executing = mp.Value('b', False)  # 是否正在执行任务
         self._logger = logging.getLogger(__name__)
         
     def put(self, task: Task, block: bool = True, timeout: Optional[float] = None) -> bool:
@@ -144,7 +146,8 @@ class TaskQueue:
                 self._queue.put(task.to_dict(), block=False)
                 
         except Exception as e:
-            self._logger.error(f"获取gesture_name列表失败: {e}")
+            # 只在调试模式下记录错误，避免日志噪音
+            self._logger.debug(f"获取gesture_name列表失败: {e}")
         
         return gesture_names
     
@@ -161,6 +164,32 @@ class TaskQueue:
         with self._lock:
             self._task_counter.value += 1
             return f"task_{int(time.time() * 1000)}_{self._task_counter.value}"
+    
+    def start_execution(self) -> bool:
+        """
+        开始执行任务，设置执行状态
+        
+        Returns:
+            bool: 是否成功开始执行
+        """
+        with self._execution_lock:
+            if self._is_executing.value:
+                self._logger.warning("已有任务正在执行，无法开始新任务")
+                return False
+            self._is_executing.value = True
+            self._logger.debug("开始执行任务")
+            return True
+    
+    def finish_execution(self):
+        """完成任务执行，清除执行状态"""
+        with self._execution_lock:
+            self._is_executing.value = False
+            self._logger.debug("任务执行完成")
+    
+    def is_executing(self) -> bool:
+        """检查是否正在执行任务"""
+        with self._execution_lock:
+            return self._is_executing.value
 
 class TaskProducer:
     """任务生产者（WebSocket服务端使用）"""
@@ -182,6 +211,11 @@ class TaskProducer:
         Returns:
             bool: 是否成功创建任务
         """
+        # 检查是否正在执行舵机任务
+        if self.task_queue.is_executing():
+            self._logger.warning(f"正在执行舵机任务，拒绝新的舵机控制任务: {gesture_name}")
+            return False
+        
         task_id = self.task_queue.generate_task_id()
         task = Task(
             task_id=task_id,
@@ -200,7 +234,7 @@ class TaskProducer:
             self._logger.info(f"舵机控制任务已创建: {gesture_name} ({task_id})")
         else:
             self._logger.error(f"创建舵机控制任务失败: {gesture_name}")
-        # 打印任务队列中的gesture_name
+        # 只在调试模式下打印队列信息
         self._print_queue_gesture_names()
         return success
     
@@ -208,9 +242,12 @@ class TaskProducer:
         """打印任务队列中所有任务的gesture_name"""
         gesture_names = self.task_queue.get_gesture_names()
         if gesture_names:
-            self._logger.info(f"任务队列中的gesture_name: {gesture_names}")
-        else:
-            self._logger.info("任务队列中没有舵机控制任务")
+            self._logger.debug(f"任务队列中的gesture_name: {gesture_names}")
+        # 移除空队列的日志，减少日志噪音
+    
+    def is_executing(self) -> bool:
+        """检查是否正在执行任务"""
+        return self.task_queue.is_executing()
     
     def create_gesture_detected_task(self, gesture_data: Dict[str, Any], 
                                    priority: int = 1) -> bool:
@@ -375,21 +412,31 @@ class TaskConsumer:
         gesture_name = task.data.get('gesture_name')
         description = task.data.get('description')
         
+        # 开始执行任务
+        if not self.task_queue.start_execution():
+            self._logger.warning(f"无法开始执行任务，可能已有任务在执行: {gesture_name}")
+            return
+        
         self._logger.info(f"执行舵机控制: {gesture_name} - {description}")
         
-        # 这里应该调用实际的舵机控制逻辑
-        # 为了解耦，我们使用回调函数
-        if hasattr(self, 'servo_control_callback'):
-            try:
-                success = self.servo_control_callback(gesture_name, description)
-                if success:
-                    self._logger.info(f"舵机控制执行成功: {gesture_name}")
-                else:
-                    self._logger.warning(f"舵机控制执行失败: {gesture_name}")
-            except Exception as e:
-                self._logger.error(f"舵机控制回调异常: {e}")
-        else:
-            self._logger.warning("未设置舵机控制回调函数")
+        try:
+            # 这里应该调用实际的舵机控制逻辑
+            # 为了解耦，我们使用回调函数
+            if hasattr(self, 'servo_control_callback'):
+                try:
+                    success = self.servo_control_callback(gesture_name, description)
+                    if success:
+                        self._logger.debug(f"舵机控制执行成功: {gesture_name}")
+                    else:
+                        self._logger.warning(f"舵机控制执行失败: {gesture_name}")
+                except Exception as e:
+                    self._logger.error(f"舵机控制回调异常: {e}")
+            else:
+                self._logger.warning("未设置舵机控制回调函数")
+        finally:
+            # 无论成功还是失败，都要完成执行状态
+            self.task_queue.finish_execution()
+            self._logger.debug(f"舵机控制任务执行完毕: {gesture_name}")
     
     def _handle_gesture_detected_task(self, task: Task):
         """处理手势检测任务"""
@@ -442,7 +489,7 @@ if __name__ == "__main__":
     # 设置舵机控制回调
     def test_servo_callback(gesture_name, description):
         print(f"执行舵机控制: {gesture_name} - {description}")
-        time.sleep(1)  # 模拟舵机控制耗时
+        time.sleep(2)  # 模拟舵机控制耗时，增加时间以便观察效果
         return True
     
     consumer.set_servo_control_callback(test_servo_callback)
@@ -452,8 +499,32 @@ if __name__ == "__main__":
     
     try:
         # 创建一些测试任务
-        producer.create_servo_control_task("FIVE", "张开手掌")
-        producer.create_servo_control_task("FIST", "握拳")
+        print("=== 测试任务队列执行控制 ===")
+        
+        # 第一个任务
+        print("1. 创建第一个任务...")
+        success1 = producer.create_servo_control_task("FIVE", "张开手掌")
+        print(f"   任务创建结果: {success1}")
+        
+        # 立即尝试创建第二个任务（应该被拒绝）
+        print("2. 立即尝试创建第二个任务...")
+        success2 = producer.create_servo_control_task("FIST", "握拳")
+        print(f"   任务创建结果: {success2} (应该被拒绝)")
+        
+        # 等待第一个任务执行完成
+        print("3. 等待第一个任务执行完成...")
+        time.sleep(3)
+        
+        # 检查执行状态
+        print(f"4. 当前执行状态: {producer.is_executing()}")
+        
+        # 现在应该可以创建新任务
+        print("5. 创建第二个任务...")
+        success3 = producer.create_servo_control_task("FIST", "握拳")
+        print(f"   任务创建结果: {success3}")
+        
+        # 创建其他类型的任务（应该不受影响）
+        print("6. 创建手势检测任务...")
         producer.create_gesture_detected_task({"gesture": "WAVE", "confidence": 0.9})
         
         # 等待任务处理完成

@@ -51,6 +51,11 @@ class MainServer:
     
     def _signal_handler(self, signum, frame):
         """信号处理器"""
+        if not self.running:
+            # 如果已经在关闭过程中，直接退出
+            self.logger.info(f"收到信号 {signum}，服务器已在关闭过程中...")
+            return
+        
         self.logger.info(f"收到信号 {signum}，开始关闭服务器...")
         # 设置停止标志，让主循环处理关闭
         self.running = False
@@ -220,7 +225,7 @@ class MainServer:
         # 主循环
         try:
             while self.running:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)  # 减少睡眠时间，提高响应速度
                 
                 # 检查舵机进程状态
                 if enable_servo:
@@ -327,8 +332,8 @@ async def main():
         gesture=True,  # 默认启用手势识别
         show_landmarks=True,  # 默认显示手部关键点
         show_scores=True,  # 默认显示分数
-        right_hand_only=True,  # 默认只处理右手
-        enable_wave_detection=args.enable_wave_detection
+        right_hand_only=False,  # 默认只处理右手
+        enable_wave_detection=True
     )
 
 if __name__ == "__main__":

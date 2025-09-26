@@ -54,7 +54,12 @@ class ServoProcess:
     
     def _signal_handler(self, signum, frame):
         """信号处理器"""
-        self.logger.info(f"收到信号 {signum}，开始关闭进程...")
+        # if not self.running:
+        #     # 如果已经在关闭过程中，直接退出
+        #     self.logger.debug(f"收到信号 {signum}，进程已在关闭过程中...")
+        #     sys.exit(0)
+        
+        # self.logger.info(f"收到信号 {signum}，开始关闭进程...")
         self.stop()
         sys.exit(0)
     
@@ -97,8 +102,6 @@ class ServoProcess:
                 return self._execute_close_gesture_sequence()
             elif gesture_name == "ONE_FINGER_GESTURE" and "比1手势" in description:
                 return self._execute_one_finger_gesture_sequence()
-            elif gesture_name == "TWO_FINGER_GESTURE" and "比2手势" in description:
-                return self._execute_one_finger_gesture_sequence()
             elif gesture_name == "LIKE_GESTURE" and "点赞手势" in description:
                 return self._execute_like_gesture_sequence()
             elif gesture_name == "WAVE_GESTURE" and "挥手动作" in description:
@@ -134,10 +137,15 @@ class ServoProcess:
         """执行比1手势(握拳✊->比1☝️)序列（使用舵机1 - 垂直方向）"""
         try:
             self.logger.info("执行比1手势序列 - 舵机1（垂直方向）")
-            target_angle = 30.0
-            # 快速点头动作
-            self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            target_angle_0 = 30.0
+            target_angle_1 = -30.0
+            # 抬头+右侧转头
+            self.servo_controller.set_servo_angle( servo_id = 0, angle = target_angle_0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle_1, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
+            self.servo_controller.set_servo_angle( servo_id = 0, angle = -target_angle_0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            time.sleep(0.5)
+            self.servo_controller.set_servo_angle( servo_id = 0, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             self.servo_controller.set_servo_angle( servo_id = 1, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
             
@@ -152,7 +160,7 @@ class ServoProcess:
         try:
             self.logger.info("执行点赞手势序列 - 舵机1（垂直方向）")
             target_angle = 30.0
-            # 快速点头动作
+            # 点头动作
             self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
             self.servo_controller.set_servo_angle( servo_id = 1, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
@@ -169,20 +177,16 @@ class ServoProcess:
         """执行挥手手势序列（使用舵机0 - 云台）"""
         try:
             self.logger.info("执行挥手手势序列 - 舵机0（云台）")
-            
-            # 左右摆动动作
-            for _ in range(3):
-                if not self.servo_controller_0.set_angle(20.0, wait=True):
-                    return False
-                time.sleep(0.1)
-                
-                if not self.servo_controller_0.set_angle(-20.0, wait=True):
-                    return False
-                time.sleep(0.1)
-            
-            # 回到中心
-            if not self.servo_controller_0.set_angle(0.0, wait=True):
-                return False
+            target_angle = 30.0
+            # 点头动作
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = -target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            time.sleep(0.5)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            time.sleep(0.5)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = -target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            time.sleep(0.5)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            time.sleep(0.5)
             
             self.logger.info("挥手手势序列执行成功")
             return True

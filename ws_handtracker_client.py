@@ -9,8 +9,9 @@ import json
 import cv2
 import base64
 import numpy as np
+import argparse
 
-async def send_video_and_receive_results():
+async def send_video_and_receive_results(enable_ui=False):
     """发送视频到服务器并接收手部跟踪结果"""
     uri = "ws://localhost:8765"
     
@@ -70,8 +71,8 @@ async def send_video_and_receive_results():
                         data = await websocket.recv()
                         result = json.loads(data)
                         
-                        # 解码处理后的图像
-                        if 'frame' in result:
+                        # 解码处理后的图像（如果启用UI）
+                        if enable_ui and 'frame' in result:
                             frame_data = base64.b64decode(result['frame'])
                             nparr = np.frombuffer(frame_data, np.uint8)
                             processed_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -80,23 +81,23 @@ async def send_video_and_receive_results():
                                 # 显示处理后的图像
                                 cv2.imshow("Hand Tracking Result", processed_frame)
                                 
-                                # 显示手部信息
-                                if 'hands' in result and result['hands']:
-                                    print(f"帧 {result.get('frame_id', 0)}: 检测到 {len(result['hands'])} 只手")
-                                    for i, hand in enumerate(result['hands']):
-                                        print(f"  手 {i+1}: 手势={hand.get('gesture', 'None')}, "
-                                              f"左右手={hand.get('handedness', 'Unknown')}, "
-                                              f"置信度={hand.get('score', 0):.2f}")
-                                
-                                # 显示FPS
-                                if 'fps' in result:
-                                    print(f"服务器FPS: {result['fps']:.1f}")
-                                
                                 # 按 'q' 退出
                                 if cv2.waitKey(1) & 0xFF == ord('q'):
                                     break
                             else:
                                 print("无法解码处理后的图像")
+                        
+                        # 显示手部信息
+                        if 'hands' in result and result['hands']:
+                            print(f"帧 {result.get('frame_id', 0)}: 检测到 {len(result['hands'])} 只手")
+                            for i, hand in enumerate(result['hands']):
+                                print(f"  手 {i+1}: 手势={hand.get('gesture', 'None')}, "
+                                      f"左右手={hand.get('handedness', 'Unknown')}, "
+                                      f"置信度={hand.get('score', 0):.2f}")
+                        
+                        # 显示FPS
+                        if 'fps' in result:
+                            print(f"服务器FPS: {result['fps']:.1f}")
                                 
                     except websockets.exceptions.ConnectionClosed:
                         print("服务器连接已关闭")
@@ -120,9 +121,20 @@ async def send_video_and_receive_results():
         print(f"连接服务器失败: {e}")
     finally:
         cap.release()
-        cv2.destroyAllWindows()
+        if enable_ui:
+            cv2.destroyAllWindows()
 
 if __name__ == "__main__":
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='WebSocket客户端 - 发送视频并接收手部跟踪结果')
+    parser.add_argument('--enable-UI', action='store_true', 
+                       help='启用UI界面显示处理后的视频帧')
+    args = parser.parse_args()
+    
     print("WebSocket客户端 - 发送视频并接收手部跟踪结果")
-    print("按 'q' 键退出")
-    asyncio.run(send_video_and_receive_results())
+    if args.enable_UI:
+        print("UI模式：按 'q' 键退出")
+    else:
+        print("无UI模式：按 Ctrl+C 退出")
+    
+    asyncio.run(send_video_and_receive_results(enable_ui=args.enable_UI))
