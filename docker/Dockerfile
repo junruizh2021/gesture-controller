@@ -7,6 +7,14 @@ ENV https_proxy=http://child-prc.intel.com:913
 COPY ./temp /home/${USERNAME}/
 WORKDIR /home/${USERNAME}/WorkSpace
 
+# Configure proxy and disable GPG verification
+RUN echo 'Acquire::http::Proxy "'${http_proxy}'";' > /etc/apt/apt.conf && \
+    echo 'Acquire::https::Proxy "'${https_proxy}'";' >> /etc/apt/apt.conf && \
+    echo 'APT::Get::AllowUnauthenticated "true";' >> /etc/apt/apt.conf && \
+    echo 'APT::Get::AllowInsecureRepositories "true";' >> /etc/apt/apt.conf && \
+    echo 'Acquire::AllowInsecureRepositories "true";' >> /etc/apt/apt.conf && \
+    echo 'Acquire::AllowDowngradeToInsecureRepositories "true";' >> /etc/apt/apt.conf
+
 RUN cp /home/${USERNAME}/WorkSpace/scripts/entrypoint.sh /usr/bin/ && \ 
     chmod 777 /usr/bin/entrypoint.sh && \
     cp /home/${USERNAME}/WorkSpace/scripts/handtracker-sever.sh /usr/bin/ && \
