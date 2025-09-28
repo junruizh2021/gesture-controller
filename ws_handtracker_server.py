@@ -345,12 +345,12 @@ dynamic_processor = None
 
 class HandTracker:
     def __init__(self, input_src=None,
-                pd_xml="models/palm_detection_FP32.xml", 
-                pd_device="GPU",
+                pd_xml="/home/gesture-controller/AI-models/palm_detection_FP32.xml", 
+                pd_device="NPU",
                 pd_score_thresh=0.5, pd_nms_thresh=0.3,
                 use_lm=True,
-                lm_xml="models/hand_landmark_FP32.xml",
-                lm_device="GPU",
+                lm_xml="/home/gesture-controller/AI-models/hand_landmark_FP32.xml",
+                lm_device="NPU",
                 lm_score_threshold=0.5,
                 use_gesture=False,
                 crop=False,

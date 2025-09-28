@@ -11,10 +11,15 @@ import sys
 import time
 import argparse
 from typing import Optional
+from openvino import Core
 
 # 添加项目根目录到Python路径
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+available_devices = Core().available_devices
+device = "NPU" if 'NPU' in available_devices else 'CPU'
+print("available_devices = {}, selected device = {}".format(available_devices, device))
 
 from servo_process import get_process_manager
 from task_queue import get_task_queue, get_task_producer
@@ -51,12 +56,12 @@ class MainServer:
     
     def _signal_handler(self, signum, frame):
         """信号处理器"""
-        if not self.running:
-            # 如果已经在关闭过程中，直接退出
-            self.logger.info(f"收到信号 {signum}，服务器已在关闭过程中...")
-            return
+        # if not self.running:
+        #     # 如果已经在关闭过程中，直接退出
+        #     self.logger.info(f"收到信号 {signum}，服务器已在关闭过程中...")
+        #     return
         
-        self.logger.info(f"收到信号 {signum}，开始关闭服务器...")
+        # self.logger.info(f"收到信号 {signum}，开始关闭服务器...")
         # 设置停止标志，让主循环处理关闭
         self.running = False
     
@@ -83,14 +88,14 @@ class MainServer:
             # 基本参数
             args.input = kwargs.get('input', '0')
             args.gesture = kwargs.get('gesture', True)  # -g 参数
-            args.pd_m = kwargs.get('pd_m', 'models/palm_detection_FP32.xml')
-            args.pd_device = kwargs.get('pd_device', 'GPU')
+            args.pd_m = kwargs.get('pd_m', '/home/gesture-controller/AI-models/palm_detection_FP32.xml')
+            args.pd_device = kwargs.get('pd_device', device)
             args.no_lm = kwargs.get('no_lm', False)
-            args.lm_m = kwargs.get('lm_m', 'models/hand_landmark_FP32.xml')
-            args.lm_device = kwargs.get('lm_device', 'GPU')
+            args.lm_m = kwargs.get('lm_m', '/home/gesture-controller/AI-models/hand_landmark_FP32.xml')
+            args.lm_device = kwargs.get('lm_device', device)
             args.crop = kwargs.get('crop', False)
             args.no_gui = True  # WebSocket模式下强制无头模式
-            args.right_hand_only = kwargs.get('right_hand_only', True)  # 默认只处理右手
+            args.right_hand_only = kwargs.get('right_hand_only', False)  # 默认只处理右手
             
             # 显示控制参数 - 设置为默认True
             args.show_pd_box = kwargs.get('show_pd_box', False)
@@ -98,7 +103,7 @@ class MainServer:
             args.show_rot_rect = kwargs.get('show_rot_rect', False)
             args.show_landmarks = kwargs.get('show_landmarks', True)  # 默认显示手部关键点
             args.show_handedness = kwargs.get('show_handedness', False)
-            args.show_scores = kwargs.get('show_scores', True)  # 默认显示分数
+            args.show_scores = kwargs.get('show_scores', False)  # 默认显示分数
             args.show_gesture_display = kwargs.get('show_gesture_display', False)
             args.show_original_video = kwargs.get('show_original_video', False)
             
@@ -331,7 +336,7 @@ async def main():
         servo_process_id=args.servo_process_id,
         gesture=True,  # 默认启用手势识别
         show_landmarks=True,  # 默认显示手部关键点
-        show_scores=True,  # 默认显示分数
+        show_scores=False,  # 默认显示分数
         right_hand_only=False,  # 默认只处理右手
         enable_wave_detection=True
     )
