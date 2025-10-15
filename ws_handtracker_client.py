@@ -13,14 +13,15 @@ import argparse
 
 async def send_video_and_receive_results(enable_ui=False):
     """发送视频到服务器并接收手部跟踪结果"""
-    uri = "ws://localhost:8765"
+    uri = "ws://10.239.152.90:8765"
+    cap = None  # 初始化cap变量
     
     try:
         async with websockets.connect(uri, max_size=None) as websocket:
             print("已连接到服务器，准备发送视频并接收结果")
             
             # 打开摄像头
-            cap = cv2.VideoCapture(4)
+            cap = cv2.VideoCapture(0)
             if not cap.isOpened():
                 print("无法打开摄像头")
                 return
@@ -120,7 +121,8 @@ async def send_video_and_receive_results(enable_ui=False):
     except Exception as e:
         print(f"连接服务器失败: {e}")
     finally:
-        cap.release()
+        if cap is not None:
+            cap.release()
         if enable_ui:
             cv2.destroyAllWindows()
 

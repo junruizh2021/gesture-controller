@@ -38,7 +38,7 @@ docker create -ti  --network=host \
     --device-cgroup-rule='a *:* rmw' \
     -v /sys:/sys:rw \
     --device ${docker_device} \
-    --device /dev/accel \
+    --device /dev/accel/accel0 \
     --device /dev/ttyUSB0 \
     --device /dev/snd --device /dev/tty0 --device /dev/tty1 --device /dev/tty2 --device /dev/tty3 \
     --cap-add=NET_ADMIN --cap-add=SYS_ADMIN ${container_docker_image_tag}
