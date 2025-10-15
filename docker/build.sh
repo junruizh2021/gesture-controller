@@ -27,7 +27,7 @@ cp "${REPO_DIR}"/*.py ./
 cp "${REPO_DIR}"/docker/*.sh ./scripts/
 
 cd "${CURRENT_DIR}"
-docker build -t gesture-controller:1.0.0 \
+docker build -t gesture-controller:1.1.0 \
        --network=host \
        --build-arg USERNAME=${USERNAME} \
        --build-arg HTTP_PROXY=${http_proxy} \

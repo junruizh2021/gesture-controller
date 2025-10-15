@@ -138,7 +138,7 @@ class ServoProcess:
         try:
             self.logger.info("执行比1手势序列 - 舵机1（垂直方向）")
             target_angle_0 = 30.0
-            target_angle_1 = -30.0
+            target_angle_1 = 30.0
             # 抬头+右侧转头
             self.servo_controller.set_servo_angle( servo_id = 0, angle = target_angle_0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle_1, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
@@ -146,7 +146,7 @@ class ServoProcess:
             self.servo_controller.set_servo_angle( servo_id = 0, angle = -target_angle_0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
             self.servo_controller.set_servo_angle( servo_id = 0, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
-            self.servo_controller.set_servo_angle( servo_id = 1, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = 60.0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
             
             self.logger.info("比1手势序列执行成功")
@@ -179,13 +179,13 @@ class ServoProcess:
             self.logger.info("执行挥手手势序列 - 舵机0（云台）")
             target_angle = 30.0
             # 点头动作
-            self.servo_controller.set_servo_angle( servo_id = 1, angle = -target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            time.sleep(0.5)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = 90.0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
             self.servo_controller.set_servo_angle( servo_id = 1, angle = target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
-            self.servo_controller.set_servo_angle( servo_id = 1, angle = -target_angle, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
-            time.sleep(0.5)
-            self.servo_controller.set_servo_angle( servo_id = 1, angle = 0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
+            self.servo_controller.set_servo_angle( servo_id = 1, angle = 60.0, interval = 500, t_acc=250, t_dec=250,is_mturn=True)
             time.sleep(0.5)
             
             self.logger.info("挥手手势序列执行成功")
